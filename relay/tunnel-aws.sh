@@ -20,16 +20,23 @@ SECRETS_FILE="$HOME/.config/herdr-remote/secrets.env"
 load_config_file() {
   local file=$1
   [ -f "$file" ] || return 0
-  local keys key restore=""
+  local keys key i
+  local -a names=() values=()
   keys=$(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' "$file")
   for key in $keys; do
-    if [ -n "${!key+set}" ]; then
-      restore="$restore$(printf 'export %s=%q\n' "$key" "${!key}")"
+    if [ -n "${!key:+set}" ]; then
+      names[${#names[@]}]="$key"
+      values[${#values[@]}]="${!key}"
     fi
   done
   # shellcheck disable=SC1090
   source "$file"
-  [ -n "$restore" ] && eval "$restore"
+  i=0
+  while [ "$i" -lt "${#names[@]}" ]; do
+    printf -v "${names[$i]}" '%s' "${values[$i]}"
+    export "${names[$i]}"
+    i=$((i + 1))
+  done
   return 0
 }
 

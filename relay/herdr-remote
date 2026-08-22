@@ -102,7 +102,7 @@ url_is_live() {
 
 cmd_start() {
   [ -d "$REPO" ] || die "repo not found at $REPO (set HERDR_REMOTE_REPO)"
-  local tok; tok=$(token_value) || die "no HERDR_RELAY_TOKEN in $SECRETS (or $CONFIG, or the environment)"
+  local tok; tok=$(token_value) || tok=""
 
   if [ "$(tunnel_mode)" = "aws" ]; then
     aws_host >/dev/null || die "HERDR_TUNNEL_MODE=aws but HERDR_AWS_HOST is not set in $CONFIG"
@@ -112,6 +112,8 @@ cmd_start() {
   mandatory for this path and there is no way to skip it.
   Set HERDR_RELAY_TOKEN in $SECRETS, or re-run relay/install-service.sh."
   fi
+
+  [ -n "$tok" ] || die "no HERDR_RELAY_TOKEN in $SECRETS (or $CONFIG, or the environment)"
 
   if [ -n "$(relay_pid)" ]; then
     echo "Already running. Current details:"
