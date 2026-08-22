@@ -9,12 +9,31 @@ RELAY_PID=""
 TUNNEL_PID=""
 
 cleanup() {
+    local rc=$?
     echo ""
     echo "Shutting down..."
     [ -n "$TUNNEL_PID" ] && kill "$TUNNEL_PID" 2>/dev/null && wait "$TUNNEL_PID" 2>/dev/null
     [ -n "$RELAY_PID" ] && kill "$RELAY_PID" 2>/dev/null && wait "$RELAY_PID" 2>/dev/null
     echo "Done."
-    exit 0
+    exit "$rc"
+}
+
+# An explicitly exported value always beats the persisted file, so a stale or
+# empty line in config.env/secrets.env can never silently disarm relay auth.
+load_config_file() {
+    local file=$1
+    [ -f "$file" ] || return 0
+    local keys key restore=""
+    keys=$(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' "$file")
+    for key in $keys; do
+        if [ -n "${!key+set}" ]; then
+            restore="$restore$(printf 'export %s=%q\n' "$key" "${!key}")"
+        fi
+    done
+    # shellcheck disable=SC1090
+    source "$file"
+    [ -n "$restore" ] && eval "$restore"
+    return 0
 }
 
 trap cleanup INT TERM EXIT
@@ -23,9 +42,22 @@ echo "herdr-remote relay"
 echo ""
 
 # Load config if available
-[ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
 SECRETS_FILE="$HOME/.config/herdr-remote/secrets.env"
-[ -f "$SECRETS_FILE" ] && source "$SECRETS_FILE"
+load_config_file "$CONFIG_FILE"
+load_config_file "$SECRETS_FILE"
+
+TUNNEL_MODE="${HERDR_TUNNEL_MODE:-temp}"
+
+# Refuse before anything is started, so the relay is not raised and then
+# torn down again on the way out.
+if [ "$TUNNEL_MODE" = "aws" ] && [ -z "${HERDR_RELAY_TOKEN:-}" ]; then
+    echo "Error: refusing to start the AWS reverse tunnel without HERDR_RELAY_TOKEN."
+    echo "  The AWS tunnel publishes this relay on the public internet over HTTPS,"
+    echo "  and the relay grants whoever reaches it full control of your agents."
+    echo "  A token is mandatory for this path and there is no way to skip it."
+    echo "  Set HERDR_RELAY_TOKEN in $SECRETS_FILE, or re-run install-service.sh."
+    exit 1
+fi
 
 # 1. Start relay
 echo "Starting relay on :$WS_PORT..."
@@ -41,19 +73,8 @@ if ! kill -0 "$RELAY_PID" 2>/dev/null; then
 fi
 echo "Relay running (pid $RELAY_PID)"
 
-TUNNEL_MODE="${HERDR_TUNNEL_MODE:-temp}"
-
 # 2. Start tunnel
 if [ "$TUNNEL_MODE" = "aws" ]; then
-    if [ -z "${HERDR_RELAY_TOKEN:-}" ]; then
-        echo "Error: refusing to start the AWS reverse tunnel without HERDR_RELAY_TOKEN."
-        echo "  The AWS tunnel publishes this relay on the public internet over HTTPS,"
-        echo "  and the relay grants whoever reaches it full control of your agents."
-        echo "  A token is mandatory for this path and there is no way to skip it."
-        echo "  Set HERDR_RELAY_TOKEN in $SECRETS_FILE, or re-run install-service.sh."
-        exit 1
-    fi
-
     echo "Starting AWS reverse tunnel..."
     "$SCRIPT_DIR/tunnel-aws.sh" &
     TUNNEL_PID=$!

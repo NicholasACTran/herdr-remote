@@ -14,10 +14,27 @@ set -uo pipefail
 
 CONFIG_FILE="$HOME/.config/herdr-remote/config.env"
 SECRETS_FILE="$HOME/.config/herdr-remote/secrets.env"
-# shellcheck disable=SC1090
-[ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
-# shellcheck disable=SC1090
-[ -f "$SECRETS_FILE" ] && source "$SECRETS_FILE"
+
+# An explicitly exported value always beats the persisted file, so a stale or
+# empty line in config.env/secrets.env can never silently disarm relay auth.
+load_config_file() {
+  local file=$1
+  [ -f "$file" ] || return 0
+  local keys key restore=""
+  keys=$(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' "$file")
+  for key in $keys; do
+    if [ -n "${!key+set}" ]; then
+      restore="$restore$(printf 'export %s=%q\n' "$key" "${!key}")"
+    fi
+  done
+  # shellcheck disable=SC1090
+  source "$file"
+  [ -n "$restore" ] && eval "$restore"
+  return 0
+}
+
+load_config_file "$CONFIG_FILE"
+load_config_file "$SECRETS_FILE"
 
 HOST="${HERDR_AWS_HOST:-}"
 SSH_USER="${HERDR_AWS_SSH_USER:-herdr-tunnel}"

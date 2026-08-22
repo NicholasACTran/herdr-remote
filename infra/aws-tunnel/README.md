@@ -49,6 +49,17 @@ for you.
   the `.pub` file's contents go into the stack, as the `TunnelPublicKey`
   parameter.
 - Your current public IP, for `SshAllowedCidr` (`curl -s ifconfig.me`).
+- A **default VPC** in the target region. The template omits `VpcId` and
+  `SubnetId`, so EC2 places the instance and security group in the region's
+  default VPC. Accounts hardened by deleting it fail at stack creation with
+  the opaque `No default VPC for this request`. Check with:
+  ```bash
+  aws ec2 describe-vpcs --profile landerafs --region us-east-1 \
+    --filters Name=isDefault,Values=true --query "Vpcs[].VpcId" --output text
+  ```
+  An empty result means you need to recreate a default VPC
+  (`aws ec2 create-default-vpc`) or add explicit `VpcId`/`SubnetId`
+  parameters to the template first.
 
 ## Deploy (run by a human, not by this PR)
 
@@ -158,5 +169,17 @@ a public service.
 - Admin access to the host itself is via AWS Systems Manager Session
   Manager (`aws ssm start-session`), not a general SSH login - the IAM
   instance profile grants only `AmazonSSMManagedInstanceCore`.
-- `HERDR_RELAY_TOKEN` is unaffected by any of this and stays required at
-  the relay - this stack is transport only, not an auth boundary.
+- `HERDR_RELAY_TOKEN` is required for this path, but be precise about where
+  that is enforced.
+  The relay process itself does not demand a token: bound to loopback it
+  accepts an empty `HERDR_RELAY_TOKEN` and then skips auth on every request,
+  and its own hard guard only fires when `HERDR_RELAY_HOST` is moved off
+  loopback - which this design deliberately never does.
+  What makes the public HTTPS endpoint require a token is a refusal at the
+  three entry points that can raise this tunnel: `install-service.sh` will
+  not install the tunnel service, and `start.sh` and `tunnel-aws.sh` will not
+  start the forward, when `HERDR_RELAY_TOKEN` is unset or empty.
+  There is no flag or config knob to bypass that refusal.
+  So do not assume the relay would reject an unauthenticated request on its
+  own - if you ever expose port 8375 by some other route, nothing behind
+  these three checks protects it.
