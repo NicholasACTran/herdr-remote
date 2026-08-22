@@ -150,6 +150,12 @@ Cloudflare Tunnel.
    reconnects after a dropped link; a plain-`ssh` retry loop is used
    otherwise.
 5. Open `https://<HERDR_AWS_HOST>` on your phone.
+6. To take it down again, use `relay/herdr-remote stop`, not a plain `kill`:
+   the supervised services restart a killed process within seconds. `stop`
+   stops the launchd/systemd services and then re-checks past that restart
+   delay, printing "Stopped" only once it has confirmed the relay port is
+   closed and no tunnel process remains. If it cannot confirm that, it says so
+   and exits non-zero — until then, assume the endpoint is still reachable.
 
 ## Architecture
 

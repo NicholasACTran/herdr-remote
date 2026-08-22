@@ -2,6 +2,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=config-lib.sh
+source "$SCRIPT_DIR/config-lib.sh"
 CONFIG_FILE="$HOME/.config/herdr-remote/config.env"
 WS_PORT="${HERDR_RELAY_PORT:-8375}"
 
@@ -10,37 +12,14 @@ TUNNEL_PID=""
 
 cleanup() {
     local rc=$?
+    set +e
+    trap - INT TERM EXIT
     echo ""
     echo "Shutting down..."
     [ -n "$TUNNEL_PID" ] && kill "$TUNNEL_PID" 2>/dev/null && wait "$TUNNEL_PID" 2>/dev/null
     [ -n "$RELAY_PID" ] && kill "$RELAY_PID" 2>/dev/null && wait "$RELAY_PID" 2>/dev/null
     echo "Done."
     exit "$rc"
-}
-
-# An explicitly exported value always beats the persisted file, so a stale or
-# empty line in config.env/secrets.env can never silently disarm relay auth.
-load_config_file() {
-    local file=$1
-    [ -f "$file" ] || return 0
-    local keys key i
-    local -a names=() values=()
-    keys=$(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' "$file")
-    for key in $keys; do
-        if [ -n "${!key:+set}" ]; then
-            names[${#names[@]}]="$key"
-            values[${#values[@]}]="${!key}"
-        fi
-    done
-    # shellcheck disable=SC1090
-    source "$file"
-    i=0
-    while [ "$i" -lt "${#names[@]}" ]; do
-        printf -v "${names[$i]}" '%s' "${values[$i]}"
-        export "${names[$i]}"
-        i=$((i + 1))
-    done
-    return 0
 }
 
 trap cleanup INT TERM EXIT

@@ -70,6 +70,37 @@ token_value() {
 tunnel_mode() { config_value HERDR_TUNNEL_MODE || echo "temp"; }
 aws_host() { config_value HERDR_AWS_HOST; }
 
+LABEL_RELAY="com.herdr-remote.relay"
+LABEL_TUNNEL="com.herdr-remote.tunnel"
+
+is_macos() { [ "$(uname -s)" = "Darwin" ]; }
+
+# install-service.sh installs these with KeepAlive/Restart=always, so a plain
+# kill is undone within seconds. Stopping means telling the supervisor.
+managed_job_loaded() {
+  local label=$1 unit=$2
+  if is_macos; then
+    launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1
+  else
+    systemctl --user is-active --quiet "$unit" 2>/dev/null
+  fi
+}
+
+managed_jobs_loaded() {
+  managed_job_loaded "$LABEL_RELAY" herdr-relay.service \
+    || managed_job_loaded "$LABEL_TUNNEL" herdr-tunnel.service
+}
+
+stop_managed_jobs() {
+  if is_macos; then
+    launchctl bootout "gui/$(id -u)/$LABEL_TUNNEL" 2>/dev/null || true
+    launchctl bootout "gui/$(id -u)/$LABEL_RELAY" 2>/dev/null || true
+  else
+    systemctl --user stop herdr-tunnel.service 2>/dev/null || true
+    systemctl --user stop herdr-relay.service 2>/dev/null || true
+  fi
+}
+
 relay_pid()  { lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1; }
 cf_tunnel_pids() { pgrep -f "cloudflared tunnel --url http://localhost:$PORT" 2>/dev/null; }
 # Three shapes to reap: the launcher script, autossh, and - when autossh
@@ -165,7 +196,9 @@ cmd_start() {
 }
 
 cmd_stop() {
-  local found=no p
+  local found=no managed=no p
+  if managed_jobs_loaded; then managed=yes; found=yes; stop_managed_jobs; fi
+
   for p in $(launcher_pids); do kill "$p" 2>/dev/null && found=yes; done
   for p in $(tunnel_pids);   do kill "$p" 2>/dev/null && found=yes; done
   p=$(relay_pid); [ -n "$p" ] && { kill "$p" 2>/dev/null && found=yes; }
@@ -173,18 +206,69 @@ cmd_stop() {
   p=$(relay_pid); [ -n "$p" ] && kill -9 "$p" 2>/dev/null
   for p in $(tunnel_pids); do kill -9 "$p" 2>/dev/null; done
 
-  if [ -n "$(relay_pid)" ] || [ -n "$(tunnel_pids)" ]; then
-    die "something is still running on port $PORT - check by hand"
+  # Outlast the supervisors' restart throttle (5s relay, 10s tunnel) before
+  # believing anything: a process absent at t=2s proves nothing.
+  local _i
+  for _i in $(seq 1 14); do
+    if [ -z "$(relay_pid)" ] && [ -z "$(tunnel_pids)" ] && ! managed_jobs_loaded; then
+      break
+    fi
+    sleep 1
+  done
+
+  local rp tp
+  rp=$(relay_pid); tp=$(tunnel_pids | head -1)
+  if [ -n "$rp" ] || [ -n "$tp" ] || managed_jobs_loaded; then
+    echo "herdr-remote: could NOT confirm shutdown - do not assume this is closed." >&2
+    [ -n "$rp" ] && echo "  Relay:  still listening on port $PORT (pid $rp)" >&2
+    [ -n "$tp" ] && echo "  Tunnel: still running (pid $tp); the reverse forward may still be bound" >&2
+    if managed_jobs_loaded; then
+      echo "  A supervised service is still loaded and will keep restarting it." >&2
+      if is_macos; then
+        echo "  Stop it with: launchctl bootout gui/\$(id -u)/$LABEL_TUNNEL" >&2
+        echo "            and launchctl bootout gui/\$(id -u)/$LABEL_RELAY" >&2
+      else
+        echo "  Stop it with: systemctl --user stop herdr-tunnel.service herdr-relay.service" >&2
+      fi
+    fi
+    exit 1
   fi
-  [ "$found" = yes ] && echo "Stopped. Port $PORT is free." || echo "Nothing was running."
+
+  if [ "$found" = no ]; then
+    echo "Nothing was running."
+    return 0
+  fi
+  echo "Stopped. Verified: port $PORT is not listening, and no tunnel process is"
+  echo "running on this machine (re-checked past the supervisors' restart delay)."
+  if [ "$managed" = yes ]; then
+    if is_macos; then
+      echo "Supervised services were booted out; they come back at next login,"
+      echo "or immediately via relay/install-service.sh."
+    else
+      echo "Supervised services were stopped; they come back at next login,"
+      echo "or immediately via: systemctl --user start herdr-relay.service"
+    fi
+  fi
 }
 
 cmd_status() {
   local r t u
   r=$(relay_pid); t=$(tunnel_pids | head -1); u=$(current_url)
   echo "  Mode:    $(tunnel_mode)"
-  if [ -n "$r" ]; then echo "  Relay:   running (pid $r)"; else echo "  Relay:   not running"; fi
-  if [ -n "$t" ]; then echo "  Tunnel:  running (pid $t)"; else echo "  Tunnel:  not running"; fi
+  if [ -n "$r" ]; then
+    echo "  Relay:   running (pid $r)"
+  elif managed_job_loaded "$LABEL_RELAY" herdr-relay.service; then
+    echo "  Relay:   no process now, but a supervised service is loaded and will restart it"
+  else
+    echo "  Relay:   not running (no process, no supervised service loaded)"
+  fi
+  if [ -n "$t" ]; then
+    echo "  Tunnel:  running (pid $t)"
+  elif managed_job_loaded "$LABEL_TUNNEL" herdr-tunnel.service; then
+    echo "  Tunnel:  no process now, but a supervised service is loaded and will restart it"
+  else
+    echo "  Tunnel:  not running (no process, no supervised service loaded)"
+  fi
   if [ -n "$u" ]; then
     if url_is_live "$u"; then
       echo "  URL:     $u  (reachable)"

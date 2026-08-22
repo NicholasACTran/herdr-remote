@@ -12,33 +12,12 @@
 #   HERDR_RELAY_PORT        default: 8375 (local relay port to forward)
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=config-lib.sh
+source "$SCRIPT_DIR/config-lib.sh"
+
 CONFIG_FILE="$HOME/.config/herdr-remote/config.env"
 SECRETS_FILE="$HOME/.config/herdr-remote/secrets.env"
-
-# An explicitly exported value always beats the persisted file, so a stale or
-# empty line in config.env/secrets.env can never silently disarm relay auth.
-load_config_file() {
-  local file=$1
-  [ -f "$file" ] || return 0
-  local keys key i
-  local -a names=() values=()
-  keys=$(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' "$file")
-  for key in $keys; do
-    if [ -n "${!key:+set}" ]; then
-      names[${#names[@]}]="$key"
-      values[${#values[@]}]="${!key}"
-    fi
-  done
-  # shellcheck disable=SC1090
-  source "$file"
-  i=0
-  while [ "$i" -lt "${#names[@]}" ]; do
-    printf -v "${names[$i]}" '%s' "${values[$i]}"
-    export "${names[$i]}"
-    i=$((i + 1))
-  done
-  return 0
-}
 
 load_config_file "$CONFIG_FILE"
 load_config_file "$SECRETS_FILE"

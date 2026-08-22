@@ -97,6 +97,14 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: SignalOwnStackResource
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: cloudformation:SignalResource
+                Resource: !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*"
       Description: >
         Grants only AWS Systems Manager Session Manager access, so the
         host can be administered without opening a general-purpose SSH
@@ -153,6 +161,10 @@ Resources:
 
   TunnelInstance:
     Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT10M
     Properties:
       InstanceType: !Ref InstanceType
       IamInstanceProfile: !Ref TunnelInstanceProfile
@@ -171,6 +183,9 @@ Resources:
         Fn::Base64: !Sub |
           #!/bin/bash
           set -euxo pipefail
+
+          dnf install -y aws-cfn-bootstrap
+          trap '/opt/aws/bin/cfn-signal -e 1 --stack ${AWS::StackName} --resource TunnelInstance --region ${AWS::Region}' ERR
 
           # --- Unprivileged, forwarding-only user for the Mac's reverse tunnel ---
           useradd --create-home --shell /usr/sbin/nologin "${TunnelUser}"
@@ -191,6 +206,7 @@ Resources:
           # bind this account exists for. GatewayPorts stays at its default
           # (no), so that bind is reachable only from this host, never from the
           # public internet.
+          install -d -m 755 /etc/ssh/sshd_config.d
           cat > /etc/ssh/sshd_config.d/99-herdr-tunnel.conf <<'SSHD'
           GatewayPorts no
           AllowTcpForwarding yes
@@ -246,6 +262,8 @@ Resources:
 
           systemctl daemon-reload
           systemctl enable --now caddy
+
+          /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --resource TunnelInstance --region ${AWS::Region}
 
 Outputs:
   ElasticIp:

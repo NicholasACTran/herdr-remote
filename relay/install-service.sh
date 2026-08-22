@@ -8,7 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_DIR="$HOME/.config/herdr-remote"
 CONFIG_FILE="$CONFIG_DIR/config.env"
 SECRETS_FILE="$CONFIG_DIR/secrets.env"
-PREEXISTING_RELAY_TOKEN="${HERDR_RELAY_TOKEN:-}"
+# shellcheck source=config-lib.sh
+source "$SCRIPT_DIR/config-lib.sh"
 
 # --- Detect OS ---
 
@@ -98,7 +99,7 @@ if [ -f "$CONFIG_FILE" ]; then
         exit 1
     fi
     # shellcheck disable=SC1090
-    source "$CONFIG_FILE"
+    load_config_file "$CONFIG_FILE"
     EXISTING_INSTALL=true
 fi
 if [ -f "$SECRETS_FILE" ]; then
@@ -119,15 +120,7 @@ if [ -f "$SECRETS_FILE" ]; then
         echo "Repair it with: chmod 600 \"$SECRETS_FILE\""
         exit 1
     fi
-    # shellcheck disable=SC1090
-    source "$SECRETS_FILE"
-fi
-
-# The persisted files must not clobber an explicitly exported token: the AWS
-# refusal below tells the user to set it in the environment, and secrets.env
-# always carries the key even when it is empty.
-if [ -n "${PREEXISTING_RELAY_TOKEN:-}" ]; then
-    HERDR_RELAY_TOKEN="$PREEXISTING_RELAY_TOKEN"
+    load_config_file "$SECRETS_FILE"
 fi
 
 WS_PORT="${HERDR_RELAY_PORT:-8375}"

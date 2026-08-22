@@ -180,6 +180,12 @@ a public service.
   not install the tunnel service, and `start.sh` and `tunnel-aws.sh` will not
   start the forward, when `HERDR_RELAY_TOKEN` is unset or empty.
   There is no flag or config knob to bypass that refusal.
+- Stopping is verified, not assumed. `herdr-remote stop` tells launchd/systemd
+  to stop the supervised relay and tunnel services (a plain kill is undone by
+  `KeepAlive`/`Restart=always` within seconds), then re-checks past the restart
+  delay and only reports "Stopped" once it has confirmed the relay port is not
+  listening and no tunnel process is running. If it cannot confirm that, it says
+  so and exits non-zero - treat that as "still publicly reachable".
   So do not assume the relay would reject an unauthenticated request on its
   own - if you ever expose port 8375 by some other route, nothing behind
   these three checks protects it.
