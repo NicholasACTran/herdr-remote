@@ -1,0 +1,72 @@
+#!/bin/bash
+# Reverse SSH tunnel from the Mac to the herdr-remote AWS rendezvous host
+# (see infra/aws-tunnel/). The Mac dials out; nothing inbound is ever
+# needed on the Mac or the home router.
+#
+# Config (from ~/.config/herdr-remote/config.env or the environment):
+#   HERDR_AWS_HOST          required - rendezvous host's stable hostname
+#   HERDR_AWS_SSH_USER      default: herdr-tunnel
+#   HERDR_AWS_SSH_PORT      default: 22
+#   HERDR_AWS_SSH_KEY       default: ~/.ssh/herdr-remote-tunnel
+#   HERDR_AWS_TUNNEL_PORT   default: 9375 (loopback port on the EC2 host)
+#   HERDR_RELAY_PORT        default: 8375 (local relay port to forward)
+set -uo pipefail
+
+CONFIG_FILE="$HOME/.config/herdr-remote/config.env"
+# shellcheck disable=SC1090
+[ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
+
+HOST="${HERDR_AWS_HOST:-}"
+SSH_USER="${HERDR_AWS_SSH_USER:-herdr-tunnel}"
+SSH_PORT="${HERDR_AWS_SSH_PORT:-22}"
+SSH_KEY="${HERDR_AWS_SSH_KEY:-$HOME/.ssh/herdr-remote-tunnel}"
+TUNNEL_PORT="${HERDR_AWS_TUNNEL_PORT:-9375}"
+RELAY_PORT="${HERDR_RELAY_PORT:-8375}"
+
+die() { printf 'tunnel-aws: %s\n' "$1" >&2; exit 1; }
+
+[ -n "$HOST" ] || die "HERDR_AWS_HOST is not set (add it to $CONFIG_FILE)"
+[ -r "$SSH_KEY" ] || die "SSH key not readable: $SSH_KEY"
+
+SSH_OPTS=(
+  -N
+  -o ExitOnForwardFailure=yes
+  -o ServerAliveInterval=15
+  -o ServerAliveCountMax=3
+  -o StrictHostKeyChecking=accept-new
+  -o BatchMode=yes
+  -i "$SSH_KEY"
+  -p "$SSH_PORT"
+  -R "127.0.0.1:${TUNNEL_PORT}:127.0.0.1:${RELAY_PORT}"
+  "${SSH_USER}@${HOST}"
+)
+
+echo "tunnel-aws: forwarding ${HOST}:${TUNNEL_PORT} -> 127.0.0.1:${RELAY_PORT}"
+
+if command -v autossh >/dev/null 2>&1; then
+  # Foreground (no -f): this script is meant to run under a service
+  # supervisor (launchd/systemd), which needs to hold the PID to detect
+  # and restart a fully-dead autossh, not just a dropped SSH session.
+  export AUTOSSH_GATETIME=0
+  exec autossh -M 0 -N \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=15 \
+    -o ServerAliveCountMax=3 \
+    -o StrictHostKeyChecking=accept-new \
+    -o BatchMode=yes \
+    -i "$SSH_KEY" \
+    -p "$SSH_PORT" \
+    -R "127.0.0.1:${TUNNEL_PORT}:127.0.0.1:${RELAY_PORT}" \
+    "${SSH_USER}@${HOST}"
+fi
+
+echo "tunnel-aws: autossh not found, falling back to a supervised retry loop"
+echo "tunnel-aws: install autossh for faster reconnects (brew install autossh)"
+
+BACKOFF=1
+while true; do
+  ssh "${SSH_OPTS[@]}"
+  echo "tunnel-aws: connection dropped, retrying in ${BACKOFF}s"
+  sleep "$BACKOFF"
+  BACKOFF=$(( BACKOFF < 30 ? BACKOFF * 2 : 30 ))
+done

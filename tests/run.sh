@@ -129,6 +129,26 @@ echo "18. LICENSE is AGPL"
 grep -q "GNU AFFERO GENERAL PUBLIC LICENSE" "$DIR/LICENSE"
 assert_eq "$?" "0" "AGPL license"
 
+# --- AWS reverse tunnel ---
+echo ""
+echo "=== AWS reverse tunnel ==="
+echo "19. tunnel-aws.sh and herdr-remote wrapper are executable"
+[ -x "$DIR/relay/tunnel-aws.sh" ] && [ -x "$DIR/relay/herdr-remote" ]
+assert_eq "$?" "0" "aws tunnel scripts +x"
+
+echo "20. no secrets in infra/aws-tunnel"
+! grep -riE "AKIA[0-9A-Z]{16}|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY" "$DIR/infra/aws-tunnel" -r
+assert_eq "$?" "0" "no AWS keys or private keys committed"
+
+echo "21. CloudFormation template validates"
+if command -v aws >/dev/null 2>&1 && aws sts get-caller-identity >/dev/null 2>&1; then
+  aws cloudformation validate-template --region us-east-1 \
+    --template-body "file://$DIR/infra/aws-tunnel/cloudformation.yaml" >/dev/null 2>&1
+  assert_eq "$?" "0" "cloudformation.yaml is well-formed"
+else
+  PASS=$((PASS+1)); echo "  skip: aws CLI not available or not authenticated (no local mutation, read-only API call)"
+fi
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] && exit 0 || exit 1

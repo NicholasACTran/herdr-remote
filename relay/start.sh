@@ -39,9 +39,22 @@ if ! kill -0 "$RELAY_PID" 2>/dev/null; then
 fi
 echo "Relay running (pid $RELAY_PID)"
 
-# 2. Start tunnel (if cloudflared available)
-if command -v cloudflared >/dev/null 2>&1; then
-    TUNNEL_MODE="${HERDR_TUNNEL_MODE:-temp}"
+TUNNEL_MODE="${HERDR_TUNNEL_MODE:-temp}"
+
+# 2. Start tunnel
+if [ "$TUNNEL_MODE" = "aws" ]; then
+    echo "Starting AWS reverse tunnel..."
+    "$SCRIPT_DIR/tunnel-aws.sh" &
+    TUNNEL_PID=$!
+    sleep 2
+
+    if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+        echo "Error: AWS tunnel failed to start. Check HERDR_AWS_HOST/HERDR_AWS_SSH_KEY in $CONFIG_FILE."
+        TUNNEL_PID=""
+    elif [ -n "${HERDR_AWS_HOST:-}" ]; then
+        echo "Tunnel URL: https://${HERDR_AWS_HOST}"
+    fi
+elif command -v cloudflared >/dev/null 2>&1; then
 
     if [ "$TUNNEL_MODE" = "named" ] && [ -n "$HERDR_TUNNEL_NAME" ]; then
         echo "Starting named tunnel ($HERDR_TUNNEL_NAME)..."
