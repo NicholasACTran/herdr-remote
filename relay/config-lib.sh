@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # herdr-remote shared config loading. Source this; do not execute it.
 #
 # load_config_file FILE
