@@ -63,9 +63,28 @@ fi
 echo "tunnel-aws: autossh not found, falling back to a supervised retry loop"
 echo "tunnel-aws: install autossh for faster reconnects (brew install autossh)"
 
+# ssh runs in the background so a signal can reach it. Left in the
+# foreground it would outlive this script when a supervisor (start.sh's
+# cleanup trap, or `herdr-remote stop`) kills us, and the orphan keeps
+# the remote forward bound - which makes the next connection fail
+# against ExitOnForwardFailure with no visible reason.
+SSH_PID=""
+cleanup() {
+  trap - INT TERM EXIT
+  if [ -n "$SSH_PID" ]; then
+    kill "$SSH_PID" 2>/dev/null
+    wait "$SSH_PID" 2>/dev/null
+  fi
+  exit 0
+}
+trap cleanup INT TERM EXIT
+
 BACKOFF=1
 while true; do
-  ssh "${SSH_OPTS[@]}"
+  ssh "${SSH_OPTS[@]}" &
+  SSH_PID=$!
+  wait "$SSH_PID" 2>/dev/null
+  SSH_PID=""
   echo "tunnel-aws: connection dropped, retrying in ${BACKOFF}s"
   sleep "$BACKOFF"
   BACKOFF=$(( BACKOFF < 30 ? BACKOFF * 2 : 30 ))

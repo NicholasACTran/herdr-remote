@@ -136,17 +136,38 @@ echo "19. tunnel-aws.sh and herdr-remote wrapper are executable"
 [ -x "$DIR/relay/tunnel-aws.sh" ] && [ -x "$DIR/relay/herdr-remote" ]
 assert_eq "$?" "0" "aws tunnel scripts +x"
 
-echo "20. no secrets in infra/aws-tunnel"
-! grep -riE "AKIA[0-9A-Z]{16}|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY" "$DIR/infra/aws-tunnel" -r
-assert_eq "$?" "0" "no AWS keys or private keys committed"
-
-echo "21. CloudFormation template validates"
+echo "20. CloudFormation template validates"
 if command -v aws >/dev/null 2>&1 && aws sts get-caller-identity >/dev/null 2>&1; then
   aws cloudformation validate-template --region us-east-1 \
     --template-body "file://$DIR/infra/aws-tunnel/cloudformation.yaml" >/dev/null 2>&1
   assert_eq "$?" "0" "cloudformation.yaml is well-formed"
 else
   PASS=$((PASS+1)); echo "  skip: aws CLI not available or not authenticated (no local mutation, read-only API call)"
+fi
+
+# --- Repository policy gates ---
+# These are POLICY gates, not behavior tests. They assert a property of the
+# repository's contents itself, which is the thing being guaranteed - not a
+# proxy for any code working.
+echo ""
+echo "=== Repository policy ==="
+echo "21. POLICY: no credential material committed anywhere in the repository"
+# Scans every git-tracked file, not just the AWS tunnel directory and not
+# just the diff: the requirement is repo-wide, and a full scan gives the
+# same answer regardless of branch, rebase, or staging state.
+SECRET_RE='(AKIA|ASIA)[0-9A-Z]{16}'
+SECRET_RE="$SECRET_RE"'|aws_secret_access_key[[:space:]]*=[[:space:]]*[A-Za-z0-9/+=]{40}'
+SECRET_RE="$SECRET_RE"'|-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----'
+if command -v git >/dev/null 2>&1 && git -C "$DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  SECRET_HITS=$(git -C "$DIR" grep -lIE "$SECRET_RE" -- . 2>/dev/null)
+  if [ -n "$SECRET_HITS" ]; then
+    echo "  credential material found in:"
+    echo "$SECRET_HITS" | sed 's/^/    /'
+  fi
+  [ -z "$SECRET_HITS" ]
+  assert_eq "$?" "0" "no AWS keys or private keys are committed"
+else
+  FAIL=$((FAIL+1)); echo "  FAIL: cannot run the secret-hygiene gate outside a git checkout"
 fi
 
 echo ""

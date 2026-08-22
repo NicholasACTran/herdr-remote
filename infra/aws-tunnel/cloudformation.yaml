@@ -32,16 +32,23 @@ Parameters:
       Required - there is no default, and this template refuses a
       world-open value. If your ISP rotates your IP, update the security
       group rule after it changes (see README).
-    AllowedPattern: ^(?!0\.0\.0\.0/0$).+$
-    ConstraintDescription: must not be 0.0.0.0/0 - SSH must not be world-open.
+    AllowedPattern: ^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}/([1-9]|[12][0-9]|3[0-2])$
+    ConstraintDescription: >
+      must be a well-formed IPv4 CIDR with a prefix length of /1 to /32
+      (e.g. 203.0.113.5/32). /0 is rejected outright - SSH must never be
+      world-open.
 
   TunnelPort:
     Type: Number
     Default: 9375
+    MinValue: 1024
+    MaxValue: 65535
     Description: >
       Loopback port on the EC2 host that the Mac's reverse tunnel
-      populates, and that Caddy reverse-proxies to. Must not be 443,
-      80, or 22.
+      populates, and that Caddy reverse-proxies to. Restricted to the
+      unprivileged range, which also keeps it clear of 443, 80 and 22 -
+      Caddy proxying to its own listener would deadlock the host.
+    ConstraintDescription: must be an unprivileged port between 1024 and 65535.
 
   TunnelUser:
     Type: String
@@ -51,7 +58,12 @@ Parameters:
   InstanceType:
     Type: String
     Default: t4g.nano
-    Description: Smallest Graviton instance class that comfortably runs Caddy + sshd.
+    AllowedValues: [t4g.nano, t4g.micro, t4g.small, t4g.medium, t4g.large]
+    Description: >
+      Smallest Graviton instance class that comfortably runs Caddy + sshd.
+      Restricted to t4g.* because ImageId below resolves the arm64 AMI
+      alias - an x86_64 type would fail at launch.
+    ConstraintDescription: must be a t4g.* (Graviton/arm64) type, to match the arm64 AMI.
 
   HostedZoneId:
     Type: String
@@ -139,6 +151,9 @@ Resources:
       SecurityGroupIds:
         - !Ref TunnelSecurityGroup
       ImageId: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}"
+      MetadataOptions:
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
       Tags:
         - Key: Name
           Value: herdr-remote-tunnel
@@ -153,16 +168,21 @@ Resources:
           useradd --create-home --shell /usr/sbin/nologin "${TunnelUser}"
           install -d -m 700 -o "${TunnelUser}" -g "${TunnelUser}" "/home/${TunnelUser}/.ssh"
           cat > "/home/${TunnelUser}/.ssh/authorized_keys" <<KEYS
-          restrict,port-forwarding ${TunnelPublicKey}
+          restrict,port-forwarding,permitopen="none",permitlisten="127.0.0.1:${TunnelPort}" ${TunnelPublicKey}
           KEYS
           chown "${TunnelUser}:${TunnelUser}" "/home/${TunnelUser}/.ssh/authorized_keys"
           chmod 600 "/home/${TunnelUser}/.ssh/authorized_keys"
 
           # `restrict` (OpenSSH >= 7.2) already disables pty/agent/X11 forwarding,
-          # user-rc execution, and command execution; `port-forwarding` re-enables
-          # only the -R/-L forwarding this account exists for. GatewayPorts stays
-          # at its default (no), so a `-R 127.0.0.1:PORT:...` bind is reachable
-          # only from this host, never from the public internet.
+          # user-rc execution, and command execution. `port-forwarding` would
+          # re-enable BOTH -L and -R, which would turn this host into a general
+          # TCP proxy for anything its egress can reach - including the instance
+          # metadata service and this instance role's credentials. So it is
+          # immediately narrowed: `permitopen="none"` denies all local (-L and
+          # -D) forwarding, and `permitlisten` allows exactly the one reverse
+          # bind this account exists for. GatewayPorts stays at its default
+          # (no), so that bind is reachable only from this host, never from the
+          # public internet.
           cat > /etc/ssh/sshd_config.d/99-herdr-tunnel.conf <<'SSHD'
           GatewayPorts no
           AllowTcpForwarding yes

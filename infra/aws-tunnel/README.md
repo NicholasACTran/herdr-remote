@@ -77,9 +77,28 @@ aws cloudformation describe-stacks --profile landerafs --region us-east-1 \
 and create an A record for `HostnameFqdn` pointing at the printed
 `ElasticIp` in whatever DNS provider hosts that domain.
 
-DNS must resolve and Caddy must have obtained its certificate (usually
-under a minute after the A record propagates) before the Mac's tunnel or
-a phone browser can reach it over HTTPS.
+Then restart Caddy once, after the A record actually resolves:
+
+```bash
+aws ssm start-session --profile landerafs --region us-east-1 \
+  --target "$(aws cloudformation describe-stacks --profile landerafs \
+    --region us-east-1 --stack-name herdr-remote-tunnel \
+    --query "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue" --output text)"
+# then, in the session:
+sudo systemctl restart caddy
+```
+
+This step is not optional housekeeping.
+Caddy is enabled at first boot, which is necessarily before the Elastic IP is associated and long before you have created the A record, so its first few ACME attempts fail and certmagic backs off exponentially.
+Without the restart, HTTPS can stay down for many minutes after DNS is already correct, and the stack looks broken when it is not.
+Restarting clears the backoff and Caddy issues the certificate on its next attempt, usually within a minute.
+
+DNS must resolve and Caddy must hold a certificate before the Mac's
+tunnel or a phone browser can reach it over HTTPS. Check with:
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' https://herdr-remote.example.com/
+```
 
 ## Updating the SSH-allowed CIDR
 
@@ -118,9 +137,18 @@ a public service.
 - The relay stays bound to `127.0.0.1` on the Mac. This stack cannot
   reach it directly - only the tunnel the Mac opens can.
 - SSH accepts exactly one identity: the forwarding-only `herdr-tunnel`
-  user, restricted with the `restrict,port-forwarding` authorized_keys
-  option (no shell, no command execution, no agent/X11 forwarding -
-  just the `-R` forward this exists for).
+  user. Its authorized_keys options are
+  `restrict,port-forwarding,permitopen="none",permitlisten="127.0.0.1:<TunnelPort>"`
+  - no shell, no command execution, no agent/X11 forwarding, and
+  crucially no local (`-L`) or dynamic (`-D`) forwarding at all, so the
+  key cannot be used to turn this host into a general TCP proxy for
+  anything its egress reaches (the instance metadata service among
+  them). `permitlisten` narrows the remote side too: the only bind this
+  key may request is the single `127.0.0.1:<TunnelPort>` the relay
+  tunnel exists for, not an arbitrary port of the holder's choosing.
+- The instance requires IMDSv2 (`HttpTokens: required`, hop limit 1), so
+  even a future forwarding mistake cannot be turned into a simple
+  unauthenticated read of the instance role's credentials.
 - `GatewayPorts no` (the default, set explicitly) means the tunnel's
   remote port binds to the EC2 host's loopback only - nothing but Caddy,
   running on that same host, can reach it.
