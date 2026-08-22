@@ -5,7 +5,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=config-lib.sh
 source "$SCRIPT_DIR/config-lib.sh"
 CONFIG_FILE="$HOME/.config/herdr-remote/config.env"
-WS_PORT="${HERDR_RELAY_PORT:-8375}"
 
 RELAY_PID=""
 TUNNEL_PID=""
@@ -31,6 +30,8 @@ echo ""
 SECRETS_FILE="$HOME/.config/herdr-remote/secrets.env"
 load_config_file "$CONFIG_FILE"
 load_config_file "$SECRETS_FILE"
+
+WS_PORT="${HERDR_RELAY_PORT:-8375}"
 
 TUNNEL_MODE="${HERDR_TUNNEL_MODE:-temp}"
 

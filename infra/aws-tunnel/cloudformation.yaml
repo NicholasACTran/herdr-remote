@@ -208,7 +208,7 @@ Resources:
           # this host would be a general TCP proxy for anything its egress
           # reaches - the instance metadata service among them.
           install -d -m 755 /etc/ssh/sshd_config.d
-          cat > /etc/ssh/sshd_config.d/99-herdr-tunnel.conf <<SSHD
+          cat > /etc/ssh/sshd_config.d/99-herdr-tunnel.conf <<'SSHD'
           GatewayPorts no
           AllowTcpForwarding yes
 

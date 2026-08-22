@@ -35,7 +35,6 @@ fi
 CONFIG="$HOME/.config/herdr-remote/config.env"
 SECRETS="$HOME/.config/herdr-remote/secrets.env"
 LOG="$REPO/relay/relay.log"
-PORT="${HERDR_RELAY_PORT:-8375}"
 WEB_APP="https://herdr-remote.pages.dev"
 CF_URL_RE='https://[a-z0-9-]*\.trycloudflare\.com'
 
@@ -59,6 +58,16 @@ value_from() {
 
 config_value() { value_from "$1" "$CONFIG"; }
 
+# Every setting follows one rule, the same one start.sh/tunnel-aws.sh and
+# install-service.sh use: a non-empty exported value beats the persisted
+# file. A wrapper that disagreed with them about the port or the mode would
+# aim all of its checks at the wrong process.
+setting() {
+  local key="$1"
+  if [ -n "${!key:-}" ]; then printf '%s\n' "${!key}"; return 0; fi
+  config_value "$key"
+}
+
 # The token lives in secrets.env (mode 0600), which is where
 # install-service.sh has always written it; config.env is 0644 and never
 # carries it. Environment wins over both, for one-off overrides.
@@ -67,8 +76,10 @@ token_value() {
   value_from HERDR_RELAY_TOKEN "$SECRETS" "$CONFIG"
 }
 
-tunnel_mode() { config_value HERDR_TUNNEL_MODE || echo "temp"; }
-aws_host() { config_value HERDR_AWS_HOST; }
+tunnel_mode() { setting HERDR_TUNNEL_MODE || echo "temp"; }
+aws_host() { setting HERDR_AWS_HOST; }
+
+PORT="$(setting HERDR_RELAY_PORT || echo 8375)"
 
 LABEL_RELAY="com.herdr-remote.relay"
 LABEL_TUNNEL="com.herdr-remote.tunnel"
@@ -82,7 +93,8 @@ managed_job_loaded() {
   if is_macos; then
     launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1
   else
-    systemctl --user is-active --quiet "$unit" 2>/dev/null
+    systemctl --user is-active --quiet "$unit" 2>/dev/null \
+      || systemctl --user is-enabled --quiet "$unit" 2>/dev/null
   fi
 }
 
