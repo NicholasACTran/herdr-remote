@@ -148,15 +148,21 @@ a public service.
 - The relay stays bound to `127.0.0.1` on the Mac. This stack cannot
   reach it directly - only the tunnel the Mac opens can.
 - SSH accepts exactly one identity: the forwarding-only `herdr-tunnel`
-  user. Its authorized_keys options are
-  `restrict,port-forwarding,permitopen="none",permitlisten="127.0.0.1:<TunnelPort>"`
-  - no shell, no command execution, no agent/X11 forwarding, and
-  crucially no local (`-L`) or dynamic (`-D`) forwarding at all, so the
-  key cannot be used to turn this host into a general TCP proxy for
-  anything its egress reaches (the instance metadata service among
-  them). `permitlisten` narrows the remote side too: the only bind this
-  key may request is the single `127.0.0.1:<TunnelPort>` the relay
-  tunnel exists for, not an arbitrary port of the holder's choosing.
+  user, and the restriction is split across two layers because OpenSSH
+  cannot express all of it in one.
+  Its authorized_keys options are
+  `restrict,port-forwarding,permitlisten="127.0.0.1:<TunnelPort>"` - no shell,
+  no command execution, no agent/X11 forwarding, and `permitlisten` narrows
+  the remote side so the only bind this key may request is the single
+  `127.0.0.1:<TunnelPort>` the relay tunnel exists for, not an arbitrary port
+  of the holder's choosing.
+  `port-forwarding` is required there for `-R` to work at all, but it also
+  re-enables `-L`/`-D`, and authorized_keys has no option that denies them
+  (`permitopen` accepts only `host:port`). So the local-forward block lives in
+  sshd_config instead, in a `Match User herdr-tunnel` stanza that sets
+  `AllowTcpForwarding remote` and `PermitOpen none`. Without that stanza the
+  key would let its holder use this host as a general TCP proxy for anything
+  its egress reaches, the instance metadata service among them.
 - The instance requires IMDSv2 (`HttpTokens: required`, hop limit 1), so
   even a future forwarding mistake cannot be turned into a simple
   unauthenticated read of the instance role's credentials.
@@ -180,12 +186,12 @@ a public service.
   not install the tunnel service, and `start.sh` and `tunnel-aws.sh` will not
   start the forward, when `HERDR_RELAY_TOKEN` is unset or empty.
   There is no flag or config knob to bypass that refusal.
+  So do not assume the relay would reject an unauthenticated request on its
+  own - if you ever expose port 8375 by some other route, nothing behind
+  these three checks protects it.
 - Stopping is verified, not assumed. `herdr-remote stop` tells launchd/systemd
   to stop the supervised relay and tunnel services (a plain kill is undone by
   `KeepAlive`/`Restart=always` within seconds), then re-checks past the restart
   delay and only reports "Stopped" once it has confirmed the relay port is not
   listening and no tunnel process is running. If it cannot confirm that, it says
   so and exits non-zero - treat that as "still publicly reachable".
-  So do not assume the relay would reject an unauthenticated request on its
-  own - if you ever expose port 8375 by some other route, nothing behind
-  these three checks protects it.

@@ -191,25 +191,32 @@ Resources:
           useradd --create-home --shell /usr/sbin/nologin "${TunnelUser}"
           install -d -m 700 -o "${TunnelUser}" -g "${TunnelUser}" "/home/${TunnelUser}/.ssh"
           cat > "/home/${TunnelUser}/.ssh/authorized_keys" <<'KEYS'
-          restrict,port-forwarding,permitopen="none",permitlisten="127.0.0.1:${TunnelPort}" ${TunnelPublicKey}
+          restrict,port-forwarding,permitlisten="127.0.0.1:${TunnelPort}" ${TunnelPublicKey}
           KEYS
           chown "${TunnelUser}:${TunnelUser}" "/home/${TunnelUser}/.ssh/authorized_keys"
           chmod 600 "/home/${TunnelUser}/.ssh/authorized_keys"
 
-          # `restrict` (OpenSSH >= 7.2) already disables pty/agent/X11 forwarding,
-          # user-rc execution, and command execution. `port-forwarding` would
-          # re-enable BOTH -L and -R, which would turn this host into a general
-          # TCP proxy for anything its egress can reach - including the instance
-          # metadata service and this instance role's credentials. So it is
-          # immediately narrowed: `permitopen="none"` denies all local (-L and
-          # -D) forwarding, and `permitlisten` allows exactly the one reverse
-          # bind this account exists for. GatewayPorts stays at its default
-          # (no), so that bind is reachable only from this host, never from the
-          # public internet.
+          # `restrict` (OpenSSH >= 7.2) disables pty/agent/X11 forwarding, user-rc
+          # execution, and command execution, but it also disables the -R this
+          # account exists for, so `port-forwarding` has to come back - and that
+          # re-enables BOTH -L and -R. `permitlisten` narrows the -R side to the
+          # single bind we want, but there is no authorized_keys option that
+          # denies the -L side (`permitopen` takes host:port only; `none` is an
+          # sshd_config keyword and putting it here makes sshd reject the whole
+          # key line). So the local-forward block lives in the Match stanza
+          # below, which is where OpenSSH can actually express it. Without it,
+          # this host would be a general TCP proxy for anything its egress
+          # reaches - the instance metadata service among them.
           install -d -m 755 /etc/ssh/sshd_config.d
-          cat > /etc/ssh/sshd_config.d/99-herdr-tunnel.conf <<'SSHD'
+          cat > /etc/ssh/sshd_config.d/99-herdr-tunnel.conf <<SSHD
           GatewayPorts no
           AllowTcpForwarding yes
+
+          Match User ${TunnelUser}
+              AllowTcpForwarding remote
+              PermitOpen none
+
+          Match all
           SSHD
           systemctl reload sshd
 
