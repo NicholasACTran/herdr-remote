@@ -190,7 +190,7 @@ Resources:
           # --- Unprivileged, forwarding-only user for the Mac's reverse tunnel ---
           useradd --create-home --shell /usr/sbin/nologin "${TunnelUser}"
           install -d -m 700 -o "${TunnelUser}" -g "${TunnelUser}" "/home/${TunnelUser}/.ssh"
-          cat > "/home/${TunnelUser}/.ssh/authorized_keys" <<KEYS
+          cat > "/home/${TunnelUser}/.ssh/authorized_keys" <<'KEYS'
           restrict,port-forwarding,permitopen="none",permitlisten="127.0.0.1:${TunnelPort}" ${TunnelPublicKey}
           KEYS
           chown "${TunnelUser}:${TunnelUser}" "/home/${TunnelUser}/.ssh/authorized_keys"
@@ -217,15 +217,22 @@ Resources:
           # loopback port the tunnel populates. Port 80 is never opened on
           # the security group, so Caddy issues its cert via TLS-ALPN-01
           # entirely over 443. ---
+          # Digests are the published ones from the release's own
+          # caddy_2.8.4_checksums.txt (sha512, as upstream publishes). Caddy
+          # terminates TLS in front of the relay, so the bytes are verified
+          # before anything is unpacked into /usr/bin as root.
           CADDY_VERSION="2.8.4"
+          CADDY_SHA512_arm64="5466234be3e988071cef937aedbdd94c15b6f75cf7307397e67c2641219ac9bfe2c2bb3b31fc05bc68d3b6398bbe50abfa16ccf3b127318ccac31115ad26507c"
+          CADDY_SHA512_amd64="b8bec15d14fb033562af9f207850027bcbaa1f891edc9efe00d38bf39e1bf9944f8b6b8eba041ddd4c171cd70c905174c704d705be2f23bc678fe1eaf37a2485"
           ARCH="$(uname -m)"
           case "$ARCH" in
-            aarch64) CADDY_ARCH="arm64" ;;
-            x86_64) CADDY_ARCH="amd64" ;;
+            aarch64) CADDY_ARCH="arm64"; CADDY_SHA512="${!CADDY_SHA512_arm64}" ;;
+            x86_64) CADDY_ARCH="amd64"; CADDY_SHA512="${!CADDY_SHA512_amd64}" ;;
             *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
           esac
           curl -fsSL -o /tmp/caddy.tar.gz \
             "https://github.com/caddyserver/caddy/releases/download/v${!CADDY_VERSION}/caddy_${!CADDY_VERSION}_linux_${!CADDY_ARCH}.tar.gz"
+          echo "${!CADDY_SHA512}  /tmp/caddy.tar.gz" | sha512sum -c -
           tar -xzf /tmp/caddy.tar.gz -C /usr/bin caddy
           chmod +x /usr/bin/caddy
           rm -f /tmp/caddy.tar.gz
@@ -233,7 +240,7 @@ Resources:
           useradd --system --home /var/lib/caddy --shell /usr/sbin/nologin caddy || true
           install -d -o caddy -g caddy /var/lib/caddy /etc/caddy
 
-          cat > /etc/caddy/Caddyfile <<CADDYFILE
+          cat > /etc/caddy/Caddyfile <<'CADDYFILE'
           ${HostnameFqdn} {
               reverse_proxy 127.0.0.1:${TunnelPort}
           }

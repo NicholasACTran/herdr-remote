@@ -121,7 +121,10 @@ current_url() {
     local h; h=$(aws_host)
     [ -n "$h" ] && echo "https://$h"
   else
-    [ -f "$LOG" ] && grep -o "$CF_URL_RE" "$LOG" | tail -1
+    [ -f "$LOG" ] || return 1
+    local u; u=$(grep -o "$CF_URL_RE" "$LOG" | tail -1)
+    [ -n "$u" ] || return 1
+    printf '%s\n' "$u"
   fi
 }
 
