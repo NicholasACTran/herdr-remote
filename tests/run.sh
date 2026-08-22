@@ -145,13 +145,45 @@ else
   PASS=$((PASS+1)); echo "  skip: aws CLI not available or not authenticated (no local mutation, read-only API call)"
 fi
 
+echo "21. herdr-remote stop confirms shutdown of a stopped-but-enabled unit"
+# install-service.sh enables the systemd units, and `stop` deliberately leaves
+# them enabled so they return at next login. A unit in that state is down, so
+# stop must confirm the shutdown rather than report that something will restart
+# it. Driven through the real wrapper with a mocked Linux service manager.
+HR_TMP="$(mktemp -d)"
+mkdir -p "$HR_TMP/bin" "$HR_TMP/home/.config/herdr-remote"
+printf 'HERDR_TUNNEL_MODE=temp\n' > "$HR_TMP/home/.config/herdr-remote/config.env"
+printf 'HERDR_RELAY_TOKEN=tok\n' > "$HR_TMP/home/.config/herdr-remote/secrets.env"
+printf '#!/bin/sh\necho Linux\n' > "$HR_TMP/bin/uname"
+printf '#!/bin/sh\nexit 1\n' > "$HR_TMP/bin/lsof"
+printf '#!/bin/sh\nexit 1\n' > "$HR_TMP/bin/pgrep"
+cat > "$HR_TMP/bin/systemctl" <<'HRSYSTEMCTL'
+#!/bin/sh
+# enabled, but not running: what a successful `stop` leaves behind
+for a in "$@"; do
+  case "$a" in
+    is-active)  exit 3 ;;
+    is-enabled) exit 0 ;;
+  esac
+done
+case " $* " in
+  *" show "*) echo "ActiveState=inactive" ;;
+esac
+exit 0
+HRSYSTEMCTL
+chmod +x "$HR_TMP/bin/uname" "$HR_TMP/bin/lsof" "$HR_TMP/bin/pgrep" "$HR_TMP/bin/systemctl"
+PATH="$HR_TMP/bin:$PATH" HOME="$HR_TMP/home" HERDR_REMOTE_REPO="$DIR" \
+    "$DIR/relay/herdr-remote" stop > "$HR_TMP/stop.log" 2>&1
+assert_eq "$?" "0" "stop confirms shutdown instead of claiming a restart is pending"
+rm -rf "$HR_TMP"
+
 # --- Repository policy gates ---
 # These are POLICY gates, not behavior tests. They assert a property of the
 # repository's contents itself, which is the thing being guaranteed - not a
 # proxy for any code working.
 echo ""
 echo "=== Repository policy ==="
-echo "21. POLICY: no credential material committed anywhere in the repository"
+echo "22. POLICY: no credential material committed anywhere in the repository"
 # Scans every git-tracked file, not just the AWS tunnel directory and not
 # just the diff: the requirement is repo-wide, and a full scan gives the
 # same answer regardless of branch, rebase, or staging state.

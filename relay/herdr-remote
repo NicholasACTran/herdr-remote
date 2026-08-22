@@ -88,13 +88,22 @@ is_macos() { [ "$(uname -s)" = "Darwin" ]; }
 
 # install-service.sh installs these with KeepAlive/Restart=always, so a plain
 # kill is undone within seconds. Stopping means telling the supervisor.
+# "Loaded" means the supervisor is still in charge of the process right now,
+# which is what stop has to disprove. On systemd that is ActiveState, not
+# is-enabled: an explicitly stopped unit stays enabled so it returns at next
+# login, but it is genuinely down until then and Restart=always does not
+# revive it. activating covers the RestartSec auto-restart window.
 managed_job_loaded() {
   local label=$1 unit=$2
   if is_macos; then
     launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1
   else
-    systemctl --user is-active --quiet "$unit" 2>/dev/null \
-      || systemctl --user is-enabled --quiet "$unit" 2>/dev/null
+    local state
+    state=$(systemctl --user show -p ActiveState "$unit" 2>/dev/null)
+    case "${state#ActiveState=}" in
+      active|activating|reloading|deactivating) return 0 ;;
+      *) return 1 ;;
+    esac
   fi
 }
 
