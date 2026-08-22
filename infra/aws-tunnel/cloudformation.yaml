@@ -23,7 +23,15 @@ Parameters:
       The PUBLIC key (e.g. contents of ~/.ssh/herdr-remote-tunnel.pub)
       the Mac will use to open the reverse tunnel. Paste the public key
       only - never a private key. This is not treated as a secret, but
-      review it is the value you expect before applying.
+      review it is the value you expect before applying. The pattern below
+      accepts only an OpenSSH public key line, so a pasted private key or a
+      truncated key is rejected at deploy time rather than being written
+      verbatim into authorized_keys and failing later as "Permission denied".
+    AllowedPattern: ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) +[A-Za-z0-9+/]+=*( .*)?$
+    ConstraintDescription: >
+      must be a single OpenSSH PUBLIC key line - "ssh-ed25519 AAAA... comment"
+      (or ssh-rsa / ecdsa-sha2-nistp256|384|521). A private key, a key file
+      with headers, or a truncated value is rejected.
 
   SshAllowedCidr:
     Type: String

@@ -13,8 +13,11 @@
 set -uo pipefail
 
 CONFIG_FILE="$HOME/.config/herdr-remote/config.env"
+SECRETS_FILE="$HOME/.config/herdr-remote/secrets.env"
 # shellcheck disable=SC1090
 [ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
+# shellcheck disable=SC1090
+[ -f "$SECRETS_FILE" ] && source "$SECRETS_FILE"
 
 HOST="${HERDR_AWS_HOST:-}"
 SSH_USER="${HERDR_AWS_SSH_USER:-herdr-tunnel}"
@@ -27,6 +30,15 @@ die() { printf 'tunnel-aws: %s\n' "$1" >&2; exit 1; }
 
 [ -n "$HOST" ] || die "HERDR_AWS_HOST is not set (add it to $CONFIG_FILE)"
 [ -r "$SSH_KEY" ] || die "SSH key not readable: $SSH_KEY"
+
+if [ -z "${HERDR_RELAY_TOKEN:-}" ]; then
+  die "refusing to open the reverse tunnel without HERDR_RELAY_TOKEN.
+  This tunnel publishes the relay on the public internet over HTTPS, and the
+  relay grants whoever reaches it full control of your agents - read output,
+  send keys, and trust all tools for a blocked agent. A token is mandatory
+  for this path and there is no way to skip it.
+  Set HERDR_RELAY_TOKEN in $SECRETS_FILE, or re-run relay/install-service.sh."
+fi
 
 SSH_OPTS=(
   -N

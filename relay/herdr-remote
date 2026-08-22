@@ -19,7 +19,19 @@
 #   ln -sf "$(pwd)/relay/herdr-remote" ~/.local/bin/herdr-remote
 set -uo pipefail
 
-REPO="${HERDR_REMOTE_REPO:-$HOME/Documents/Projects/firstmate/projects/herdr-remote}"
+if [ -n "${HERDR_REMOTE_REPO:-}" ]; then
+  REPO="$HERDR_REMOTE_REPO"
+else
+  _src="${BASH_SOURCE[0]}"
+  while [ -L "$_src" ]; do
+    _target=$(readlink "$_src")
+    case "$_target" in
+      /*) _src="$_target" ;;
+      *)  _src="$(dirname "$_src")/$_target" ;;
+    esac
+  done
+  REPO="$(cd "$(dirname "$_src")/.." && pwd)"
+fi
 CONFIG="$HOME/.config/herdr-remote/config.env"
 SECRETS="$HOME/.config/herdr-remote/secrets.env"
 LOG="$REPO/relay/relay.log"
@@ -94,6 +106,11 @@ cmd_start() {
 
   if [ "$(tunnel_mode)" = "aws" ]; then
     aws_host >/dev/null || die "HERDR_TUNNEL_MODE=aws but HERDR_AWS_HOST is not set in $CONFIG"
+    [ -n "$tok" ] || die "refusing to start the AWS reverse tunnel without HERDR_RELAY_TOKEN.
+  The AWS tunnel publishes this relay on the public internet over HTTPS, and
+  the relay grants whoever reaches it full control of your agents. A token is
+  mandatory for this path and there is no way to skip it.
+  Set HERDR_RELAY_TOKEN in $SECRETS, or re-run relay/install-service.sh."
   fi
 
   if [ -n "$(relay_pid)" ]; then
@@ -187,7 +204,7 @@ case "${1:-}" in
   url)    current_url || die "no URL recorded" ;;
   token)  token_value || die "no token in $SECRETS" ;;
   ""|-h|--help|help)
-    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+    awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
     ;;
   *) die "unknown command '$1' (try: start, stop, status, url, token)" ;;
 esac

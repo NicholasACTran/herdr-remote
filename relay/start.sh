@@ -24,6 +24,8 @@ echo ""
 
 # Load config if available
 [ -f "$CONFIG_FILE" ] && source "$CONFIG_FILE"
+SECRETS_FILE="$HOME/.config/herdr-remote/secrets.env"
+[ -f "$SECRETS_FILE" ] && source "$SECRETS_FILE"
 
 # 1. Start relay
 echo "Starting relay on :$WS_PORT..."
@@ -43,6 +45,15 @@ TUNNEL_MODE="${HERDR_TUNNEL_MODE:-temp}"
 
 # 2. Start tunnel
 if [ "$TUNNEL_MODE" = "aws" ]; then
+    if [ -z "${HERDR_RELAY_TOKEN:-}" ]; then
+        echo "Error: refusing to start the AWS reverse tunnel without HERDR_RELAY_TOKEN."
+        echo "  The AWS tunnel publishes this relay on the public internet over HTTPS,"
+        echo "  and the relay grants whoever reaches it full control of your agents."
+        echo "  A token is mandatory for this path and there is no way to skip it."
+        echo "  Set HERDR_RELAY_TOKEN in $SECRETS_FILE, or re-run install-service.sh."
+        exit 1
+    fi
+
     echo "Starting AWS reverse tunnel..."
     "$SCRIPT_DIR/tunnel-aws.sh" &
     TUNNEL_PID=$!
@@ -52,7 +63,18 @@ if [ "$TUNNEL_MODE" = "aws" ]; then
         echo "Error: AWS tunnel failed to start. Check HERDR_AWS_HOST/HERDR_AWS_SSH_KEY in $CONFIG_FILE."
         TUNNEL_PID=""
     elif [ -n "${HERDR_AWS_HOST:-}" ]; then
-        echo "Tunnel URL: https://${HERDR_AWS_HOST}"
+        # The supervisor staying alive proves nothing: the plain-ssh fallback
+        # loop keeps retrying forever even if every connection attempt fails.
+        # Probe the endpoint before calling it reachable.
+        TUNNEL_URL="https://${HERDR_AWS_HOST}"
+        if curl -fsS -o /dev/null --max-time 10 \
+             -H "Authorization: Bearer $HERDR_RELAY_TOKEN" "$TUNNEL_URL" 2>/dev/null; then
+            echo "Tunnel URL: $TUNNEL_URL (reachable)"
+        else
+            echo "Tunnel supervisor started; URL will be $TUNNEL_URL once connected."
+            echo "  Not answering yet - it may still be connecting, or check the"
+            echo "  SSH key, HERDR_AWS_HOST, and the EC2 security group's SSH CIDR."
+        fi
     fi
 elif command -v cloudflared >/dev/null 2>&1; then
 

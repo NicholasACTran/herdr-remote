@@ -499,6 +499,21 @@ if [ "${HERDR_TUNNEL_MODE:-}" = "aws" ]; then
     echo "-------------------"
     echo "  HERDR_TUNNEL_MODE=aws in $CONFIG_FILE — installing the reverse"
     echo "  SSH tunnel service instead of Cloudflare Tunnel."
+
+    if [ -z "$HERDR_RELAY_TOKEN" ]; then
+        echo ""
+        echo "  Error: the AWS reverse tunnel requires HERDR_RELAY_TOKEN."
+        echo "  Unlike the Cloudflare path, this one publishes the relay on the"
+        echo "  public internet over HTTPS, and the relay grants whoever reaches"
+        echo "  it full control of your agents — read output, send keys, and"
+        echo "  trust all tools for a blocked agent. A token is mandatory here"
+        echo "  and there is no way to skip it."
+        echo ""
+        echo "  Re-run this installer and accept the token prompt, or set"
+        echo "  HERDR_RELAY_TOKEN in the environment before running it."
+        exit 1
+    fi
+
     [ -n "${HERDR_AWS_HOST:-}" ] || echo "  WARNING: HERDR_AWS_HOST is not set — the tunnel will fail to start."
     echo "  See infra/aws-tunnel/README.md for the EC2-side setup."
     echo ""
@@ -1221,6 +1236,13 @@ if [ "$TUNNEL_MODE" = "none" ] || [ "$TUNNEL_MODE" = "named-external" ]; then
         echo "  Hostname: ${TUNNEL_HOSTNAME:-unknown}"
     fi
 elif [ "$TUNNEL_MODE" = "aws" ]; then
+    if [ -z "$HERDR_RELAY_TOKEN" ]; then
+        echo "Error: refusing to install the AWS reverse tunnel service without"
+        echo "  HERDR_RELAY_TOKEN. This tunnel exposes the relay publicly over the"
+        echo "  internet, so a token is mandatory and cannot be skipped."
+        exit 1
+    fi
+
     echo "Installing AWS reverse tunnel service..."
     TUNNEL_SCRIPT="$SCRIPT_DIR/tunnel-aws.sh"
 
