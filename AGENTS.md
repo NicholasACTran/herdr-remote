@@ -22,6 +22,14 @@
 - Write clear, concise commit messages
 - Stage only files related to the current task
 - Do not push to main/master without explicit permission
+- This repo is worked from a fork (`origin`) with the original author's repo
+  as `upstream`. `gh pr create` with no explicit target defaults its base to
+  the fork's *parent* (upstream), not `origin` - it assumes you're
+  contributing back. To open a PR against the fork itself, pass
+  `--repo <fork-owner>/<repo>` explicitly (and `--base`/`--head` as plain
+  branch names, since head and base are then in the same repo). Verify with
+  `gh pr view <n> --json isCrossRepository` before reporting a PR URL as
+  done - `false` means it landed on the intended repo.
 
 ## Remote access tunnel backends
 
